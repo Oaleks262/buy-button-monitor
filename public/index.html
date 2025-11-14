@@ -23,20 +23,40 @@
     <!-- Крок 1: Авторизація -->
     <div class="card">
       <h2>1️⃣ Авторизація на сайті</h2>
-      <p>Спочатку потрібно підключити криптогаманець</p>
+      <p>Підключіть криптогаманець прямо у вікні нижче</p>
       <div class="button-group">
         <button id="openBrowserBtn" class="btn btn-primary">
-          🌐 Відкрити браузер для логіну
+          🖥️ Відкрити браузер з VNC
         </button>
         <button id="saveSessionBtn" class="btn btn-success" disabled>
           💾 Зберегти сесію
         </button>
       </div>
+      
+      <!-- VNC Viewer вбудований -->
+      <div id="vncContainer" style="display:none; margin-top: 20px;">
+        <div class="vnc-header">
+          <h3>🖥️ Віддалений браузер</h3>
+          <p>Підключіть гаманець тут ↓</p>
+        </div>
+        <iframe 
+          id="vncFrame" 
+          src="" 
+          style="width:100%; height:700px; border:2px solid #667eea; border-radius:0 0 10px 10px;"
+          allow="fullscreen"
+        ></iframe>
+        <div class="vnc-controls">
+          <button id="fullscreenVnc" class="btn btn-secondary btn-sm">🖵 Повний екран</button>
+          <button id="closeVnc" class="btn btn-secondary btn-sm">✖️ Закрити VNC</button>
+        </div>
+      </div>
+      
       <div class="info-box">
         <strong>Інструкція:</strong>
         <ol>
-          <li>Натисніть "Відкрити браузер"</li>
-          <li>Підключіть гаманець на сайті</li>
+          <li>Натисніть "Відкрити браузер з VNC"</li>
+          <li>Дочекайтесь завантаження віддаленого браузера</li>
+          <li>Підключіть гаманець у вікні VNC</li>
           <li>Після успішної авторизації натисніть "Зберегти сесію"</li>
         </ol>
       </div>
@@ -117,7 +137,7 @@
     </div>
 
     <footer>
-      <p>Made with ❤️ | Version 1.0</p>
+      <p>Made with ❤️ | Version 1.0 with VNC</p>
     </footer>
   </div>
 

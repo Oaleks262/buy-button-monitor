@@ -15,6 +15,10 @@ const intervalInput = document.getElementById('interval');
 const getChatIdLink = document.getElementById('getChatIdLink');
 const modal = document.getElementById('chatIdModal');
 const closeModal = document.querySelector('.close');
+const vncContainer = document.getElementById('vncContainer');
+const vncFrame = document.getElementById('vncFrame');
+const fullscreenVnc = document.getElementById('fullscreenVnc');
+const closeVnc = document.getElementById('closeVnc');
 
 // Завантажити збережені дані з localStorage
 const savedBotToken = localStorage.getItem('botToken');
@@ -88,11 +92,11 @@ function setButtonsState(state) {
   }
 }
 
-// КНОПКА: Відкрити браузер
+// КНОПКА: Відкрити браузер з VNC
 openBrowserBtn.addEventListener('click', async () => {
-  setButtonsState('initial');
-  openBrowserBtn.innerHTML = '⏳ Відкриваю...';
-  addLog('Надсилаю запит на відкриття браузера...', 'info');
+  openBrowserBtn.disabled = true;
+  openBrowserBtn.innerHTML = '⏳ Запускаю...';
+  addLog('Запускаю браузер з VNC...', 'info');
   
   try {
     const response = await fetch('/api/open-browser', { 
@@ -103,16 +107,28 @@ openBrowserBtn.addEventListener('click', async () => {
     const data = await response.json();
     
     if (data.success) {
-      setStatus('active', 'Браузер відкрито');
+      // Показуємо VNC viewer
+      addLog('⏳ Завантаження VNC інтерфейсу (може зайняти 5-10 секунд)...', 'info');
+      
+      setTimeout(() => {
+        vncContainer.style.display = 'block';
+        vncFrame.src = `/vnc/vnc.html?host=${window.location.hostname}&port=6080&autoconnect=true&resize=scale`;
+        
+        setStatus('active', 'Браузер відкрито у VNC');
+        saveSessionBtn.disabled = false;
+        openBrowserBtn.innerHTML = '🖥️ Відкрити браузер з VNC';
+        
+        addLog('✅ VNC підключено! Тепер авторизуйтесь у вікні вище ↑', 'success');
+      }, 3000);
+      
       setButtonsState('browser-open');
-      openBrowserBtn.innerHTML = '🌐 Відкрити браузер для логіну';
     } else {
       throw new Error(data.error);
     }
   } catch (error) {
     addLog(`Помилка: ${error.message}`, 'error');
-    setButtonsState('initial');
-    openBrowserBtn.innerHTML = '🌐 Відкрити браузер для логіну';
+    openBrowserBtn.disabled = false;
+    openBrowserBtn.innerHTML = '🖥️ Відкрити браузер з VNC';
   }
 });
 
@@ -134,6 +150,10 @@ saveSessionBtn.addEventListener('click', async () => {
       setStatus('', 'Готово до моніторингу');
       setButtonsState('session-saved');
       saveSessionBtn.innerHTML = '💾 Зберегти сесію';
+      
+      // Закриваємо VNC
+      vncContainer.style.display = 'none';
+      vncFrame.src = '';
     } else {
       throw new Error(data.error);
     }
@@ -234,6 +254,24 @@ clearLogsBtn.addEventListener('click', () => {
   addLog('Логи очищено', 'info');
 });
 
+// Повний екран VNC
+fullscreenVnc.addEventListener('click', () => {
+  if (vncFrame.requestFullscreen) {
+    vncFrame.requestFullscreen();
+  } else if (vncFrame.webkitRequestFullscreen) {
+    vncFrame.webkitRequestFullscreen();
+  } else if (vncFrame.mozRequestFullScreen) {
+    vncFrame.mozRequestFullScreen();
+  }
+});
+
+// Закрити VNC
+closeVnc.addEventListener('click', () => {
+  vncContainer.style.display = 'none';
+  vncFrame.src = '';
+  addLog('VNC закрито', 'info');
+});
+
 // МОДАЛЬНЕ ВІКНО: Як отримати Chat ID
 getChatIdLink.addEventListener('click', (e) => {
   e.preventDefault();
@@ -279,5 +317,5 @@ async function checkInitialStatus() {
 checkInitialStatus();
 
 // Показати версію та інфо
-console.log('%c Buy Button Monitor v1.0 ', 'background: #667eea; color: white; font-size: 16px; padding: 5px 10px; border-radius: 5px;');
+console.log('%c Buy Button Monitor v1.0 with VNC ', 'background: #667eea; color: white; font-size: 16px; padding: 5px 10px; border-radius: 5px;');
 console.log('Server connected ✅');

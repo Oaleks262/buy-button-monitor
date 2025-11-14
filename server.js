@@ -12,7 +12,7 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server);
 
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 app.use(express.static('public'));
 
 let browser = null;
@@ -21,6 +21,8 @@ let monitoringActive = false;
 let monitorInterval = null;
 let telegramBot = null;
 let xvfbProcess = null;
+let vncProcess = null;
+let novncProcess = null;
 
 const COOKIES_PATH = path.join(__dirname, 'cookies.json');
 const URL = 'https://apm.iamlimitless.io/marketplace/order/12549';
@@ -28,18 +30,93 @@ const URL = 'https://apm.iamlimitless.io/marketplace/order/12549';
 // Запуск Xvfb
 function startXvfb() {
   return new Promise((resolve) => {
+    if (xvfbProcess) {
+      resolve();
+      return;
+    }
+    
     console.log('Starting Xvfb...');
-    xvfbProcess = spawn('Xvfb', [':99', '-screen', '0', '1920x1080x24']);
+    xvfbProcess = spawn('Xvfb', [':99', '-screen', '0', '1920x1080x24', '-ac']);
     process.env.DISPLAY = ':99';
     
     xvfbProcess.on('error', (err) => {
       console.error('Xvfb error:', err);
     });
     
+    xvfbProcess.stderr.on('data', (data) => {
+      console.error('Xvfb stderr:', data.toString());
+    });
+    
     setTimeout(() => {
-      console.log('Xvfb started');
+      console.log('Xvfb started on display :99');
       resolve();
     }, 2000);
+  });
+}
+
+// Запуск VNC сервера
+function startVNC() {
+  return new Promise((resolve) => {
+    if (vncProcess) {
+      resolve();
+      return;
+    }
+    
+    console.log('Starting x11vnc...');
+    vncProcess = spawn('x11vnc', [
+      '-display', ':99',
+      '-forever',
+      '-shared',
+      '-rfbport', '5900',
+      '-nopw',
+      '-quiet'
+    ]);
+    
+    vncProcess.on('error', (err) => {
+      console.error('VNC error:', err);
+    });
+    
+    vncProcess.stderr.on('data', (data) => {
+      console.error('VNC stderr:', data.toString());
+    });
+    
+    setTimeout(() => {
+      console.log('VNC server started on port 5900');
+      resolve();
+    }, 2000);
+  });
+}
+
+// Запуск noVNC (веб-інтерфейс для VNC)
+function startNoVNC() {
+  return new Promise((resolve) => {
+    if (novncProcess) {
+      resolve();
+      return;
+    }
+    
+    console.log('Starting noVNC...');
+    novncProcess = spawn('/opt/noVNC/utils/novnc_proxy', [
+      '--vnc', 'localhost:5900',
+      '--listen', '6080'
+    ]);
+    
+    novncProcess.on('error', (err) => {
+      console.error('noVNC error:', err);
+    });
+    
+    novncProcess.stdout.on('data', (data) => {
+      console.log('noVNC:', data.toString());
+    });
+    
+    novncProcess.stderr.on('data', (data) => {
+      console.error('noVNC stderr:', data.toString());
+    });
+    
+    setTimeout(() => {
+      console.log('noVNC web server started on port 6080');
+      resolve();
+    }, 3000);
   });
 }
 
@@ -60,16 +137,24 @@ function sendLog(message, type = 'info') {
   io.emit('log', { message, type, timestamp });
 }
 
-// ENDPOINT: Відкрити браузер для логіну
+// ENDPOINT: Відкрити браузер з VNC
 app.post('/api/open-browser', async (req, res) => {
   try {
     sendLog('🚀 Запускаю віртуальний дисплей...', 'info');
     
-    // Запускаємо Xvfb якщо не запущений
-    if (!xvfbProcess) {
-      await startXvfb();
-      sendLog('✅ Віртуальний дисплей запущено', 'success');
-    }
+    // Запускаємо Xvfb
+    await startXvfb();
+    sendLog('✅ Віртуальний дисплей запущено', 'success');
+
+    // Запускаємо VNC
+    sendLog('🖥️ Запускаю VNC сервер...', 'info');
+    await startVNC();
+    sendLog('✅ VNC сервер запущено', 'success');
+
+    // Запускаємо noVNC
+    sendLog('🌐 Запускаю веб VNC...', 'info');
+    await startNoVNC();
+    sendLog('✅ Веб VNC запущено', 'success');
 
     sendLog('🌐 Відкриваю браузер...', 'info');
 
@@ -93,10 +178,14 @@ app.post('/api/open-browser', async (req, res) => {
       timeout: 60000 
     });
 
-    sendLog('✅ Браузер відкрито. Підключіть гаманець і авторизуйтесь', 'success');
-    sendLog('💡 Після авторизації натисніть кнопку "Зберегти сесію"', 'info');
+    sendLog('✅ Браузер відкрито!', 'success');
+    sendLog('👀 Тепер ви можете побачити браузер у вікні VNC', 'info');
+    sendLog('🔐 Підключіть гаманець і авторизуйтесь', 'info');
 
-    res.json({ success: true });
+    res.json({ 
+      success: true,
+      vncUrl: '/vnc/vnc.html'
+    });
   } catch (error) {
     sendLog(`❌ Помилка: ${error.message}`, 'error');
     res.status(500).json({ success: false, error: error.message });
@@ -112,10 +201,7 @@ app.post('/api/save-session', async (req, res) => {
 
     sendLog('💾 Зберігаю сесію...', 'info');
 
-    // Зберігаємо cookies
     const cookies = await page.cookies();
-    
-    // Зберігаємо localStorage
     const localStorage = await page.evaluate(() => {
       return JSON.stringify(window.localStorage);
     });
@@ -156,10 +242,9 @@ app.post('/api/start-monitoring', async (req, res) => {
     }
 
     if (!fs.existsSync(COOKIES_PATH)) {
-      throw new Error('Спочатку потрібно авторизуватись! Натисніть "Відкрити браузер"');
+      throw new Error('Спочатку потрібно авторизуватись!');
     }
 
-    // Ініціалізуємо Telegram
     const botInit = initTelegramBot(botToken);
     if (!botInit.success) {
       throw new Error('Невірний Telegram токен');
@@ -167,12 +252,6 @@ app.post('/api/start-monitoring', async (req, res) => {
 
     sendLog('🚀 Запускаю моніторинг...', 'info');
 
-    // Запускаємо Xvfb якщо не запущений
-    if (!xvfbProcess) {
-      await startXvfb();
-    }
-
-    // Відкриваємо headless браузер для моніторингу
     browser = await puppeteer.launch({
       headless: 'new',
       args: [
@@ -186,14 +265,12 @@ app.post('/api/start-monitoring', async (req, res) => {
     page = await browser.newPage();
     await page.setViewport({ width: 1920, height: 1080 });
 
-    // Завантажуємо збережену сесію
     sendLog('🔐 Завантажую збережену сесію...', 'info');
     const authData = JSON.parse(fs.readFileSync(COOKIES_PATH));
     
     await page.setCookie(...authData.cookies);
     await page.goto(URL, { waitUntil: 'domcontentloaded' });
 
-    // Відновлюємо localStorage
     if (authData.localStorage) {
       await page.evaluate((localStorageData) => {
         const data = JSON.parse(localStorageData);
@@ -208,7 +285,6 @@ app.post('/api/start-monitoring', async (req, res) => {
     monitoringActive = true;
     let isButtonActive = false;
 
-    // Функція перевірки кнопки
     async function checkButton() {
       if (!monitoringActive) return;
 
@@ -245,12 +321,10 @@ app.post('/api/start-monitoring', async (req, res) => {
         const status = buttonInfo.isEnabled ? '✅ АКТИВНА' : '❌ Заблокована';
         sendLog(`🔍 Перевірка: Кнопка "${buttonInfo.text}" - ${status}`, 'info');
 
-        // Якщо кнопка стала активною
         if (buttonInfo.isEnabled && !isButtonActive) {
           isButtonActive = true;
           sendLog('🎉 КНОПКА СТАЛА АКТИВНОЮ! Відправляю повідомлення...', 'success');
 
-          // Відправка в Telegram
           const message = `
 🚨 *КНОПКА BUY АКТИВНА!* 🚨
 
@@ -265,7 +339,6 @@ app.post('/api/start-monitoring', async (req, res) => {
             parse_mode: 'Markdown'
           });
 
-          // Скріншот
           const screenshotPath = path.join(__dirname, `screenshot-${Date.now()}.png`);
           await page.screenshot({ 
             path: screenshotPath,
@@ -278,7 +351,6 @@ app.post('/api/start-monitoring', async (req, res) => {
 
           sendLog('✅ Повідомлення відправлено в Telegram', 'success');
 
-          // Видаляємо скріншот після відправки
           setTimeout(() => {
             if (fs.existsSync(screenshotPath)) {
               fs.unlinkSync(screenshotPath);
@@ -286,7 +358,6 @@ app.post('/api/start-monitoring', async (req, res) => {
           }, 5000);
         }
 
-        // Якщо кнопка стала неактивною знову
         if (!buttonInfo.isEnabled && isButtonActive) {
           isButtonActive = false;
           sendLog('⚠️ Кнопка знову заблокована', 'warning');
@@ -297,14 +368,10 @@ app.post('/api/start-monitoring', async (req, res) => {
       }
     }
 
-    // Перша перевірка одразу
     await checkButton();
-
-    // Періодична перевірка
     monitorInterval = setInterval(checkButton, interval * 1000);
 
     sendLog(`✅ Моніторинг запущено (інтервал: ${interval} секунд)`, 'success');
-    sendLog(`📱 Повідомлення будуть відправлятись в Telegram Chat ID: ${chatId}`, 'info');
 
     res.json({ success: true });
 
@@ -348,7 +415,10 @@ app.get('/api/status', (req, res) => {
   });
 });
 
-// WebSocket з'єднання
+// Проксі для noVNC
+app.use('/vnc', express.static('/opt/noVNC'));
+
+// WebSocket
 io.on('connection', (socket) => {
   console.log('Client connected');
   sendLog('👤 Клієнт підключено до веб-інтерфейсу', 'info');
@@ -364,17 +434,11 @@ process.on('SIGINT', async () => {
   
   monitoringActive = false;
   
-  if (monitorInterval) {
-    clearInterval(monitorInterval);
-  }
-  
-  if (browser) {
-    await browser.close();
-  }
-  
-  if (xvfbProcess) {
-    xvfbProcess.kill();
-  }
+  if (monitorInterval) clearInterval(monitorInterval);
+  if (browser) await browser.close();
+  if (xvfbProcess) xvfbProcess.kill();
+  if (vncProcess) vncProcess.kill();
+  if (novncProcess) novncProcess.kill();
   
   process.exit(0);
 });
@@ -382,18 +446,18 @@ process.on('SIGINT', async () => {
 process.on('SIGTERM', async () => {
   if (browser) await browser.close();
   if (xvfbProcess) xvfbProcess.kill();
+  if (vncProcess) vncProcess.kill();
+  if (novncProcess) novncProcess.kill();
   process.exit(0);
 });
 
-// Запуск сервера
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`
 ╔════════════════════════════════════════╗
-║   Buy Button Monitor                   ║
-║   Server running on port ${PORT}         ║
-║                                        ║
-║   Open: http://localhost:${PORT}         ║
+║   Buy Button Monitor + VNC             ║
+║   Server: http://localhost:${PORT}       ║
+║   VNC: http://localhost:6080/vnc.html  ║
 ╚════════════════════════════════════════╝
   `);
 });

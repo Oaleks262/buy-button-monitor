@@ -12,7 +12,7 @@ body {
 }
 
 .container {
-  max-width: 900px;
+  max-width: 1200px;
   margin: 0 auto;
 }
 
@@ -401,6 +401,35 @@ code {
   color: #e65100;
 }
 
+.vnc-header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 15px;
+  border-radius: 10px 10px 0 0;
+  text-align: center;
+}
+
+.vnc-header h3 {
+  margin: 0 0 5px 0;
+  font-size: 1.3em;
+}
+
+.vnc-header p {
+  margin: 0;
+  opacity: 0.9;
+}
+
+.vnc-controls {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+  justify-content: center;
+}
+
+#vncContainer {
+  animation: slideDown 0.5s ease;
+}
+
 footer {
   text-align: center;
   color: white;
@@ -434,5 +463,9 @@ footer {
   .modal-content {
     margin: 10% 10px;
     padding: 25px;
+  }
+  
+  #vncFrame {
+    height: 500px !important;
   }
 }
