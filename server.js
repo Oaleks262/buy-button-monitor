@@ -6,6 +6,7 @@ const puppeteer = require('puppeteer');
 const TelegramBot = require('node-telegram-bot-api');
 const fs = require('fs');
 const path = require('path');
+const { spawn } = require('child_process');
 
 const app = express();
 const server = http.createServer(app);
@@ -19,12 +20,31 @@ let page = null;
 let monitoringActive = false;
 let monitorInterval = null;
 let telegramBot = null;
+let xvfbProcess = null;
 
 const COOKIES_PATH = path.join(__dirname, 'cookies.json');
 const URL = 'https://apm.iamlimitless.io/marketplace/order/12549';
 
+// Запуск Xvfb
+function startXvfb() {
+  return new Promise((resolve) => {
+    console.log('Starting Xvfb...');
+    xvfbProcess = spawn('Xvfb', [':99', '-screen', '0', '1920x1080x24']);
+    process.env.DISPLAY = ':99';
+    
+    xvfbProcess.on('error', (err) => {
+      console.error('Xvfb error:', err);
+    });
+    
+    setTimeout(() => {
+      console.log('Xvfb started');
+      resolve();
+    }, 2000);
+  });
+}
+
 // Ініціалізація Telegram бота
-function initTelegramBot(token, chatId) {
+function initTelegramBot(token) {
   try {
     telegramBot = new TelegramBot(token, { polling: false });
     return { success: true };
@@ -35,14 +55,23 @@ function initTelegramBot(token, chatId) {
 
 // Відправка логів на фронтенд
 function sendLog(message, type = 'info') {
-  console.log(message);
-  io.emit('log', { message, type, timestamp: new Date().toISOString() });
+  const timestamp = new Date().toISOString();
+  console.log(`[${timestamp}] [${type}] ${message}`);
+  io.emit('log', { message, type, timestamp });
 }
 
-// КРОК 1: Відкрити браузер для логіну
+// ENDPOINT: Відкрити браузер для логіну
 app.post('/api/open-browser', async (req, res) => {
   try {
-    sendLog('🚀 Відкриваю браузер для авторизації...', 'info');
+    sendLog('🚀 Запускаю віртуальний дисплей...', 'info');
+    
+    // Запускаємо Xvfb якщо не запущений
+    if (!xvfbProcess) {
+      await startXvfb();
+      sendLog('✅ Віртуальний дисплей запущено', 'success');
+    }
+
+    sendLog('🌐 Відкриваю браузер...', 'info');
 
     browser = await puppeteer.launch({
       headless: false,
@@ -50,14 +79,22 @@ app.post('/api/open-browser', async (req, res) => {
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
-        '--window-size=1920,1080'
+        '--window-size=1920,1080',
+        '--disable-dev-shm-usage',
+        '--disable-gpu'
       ]
     });
 
     page = await browser.newPage();
-    await page.goto(URL, { waitUntil: 'networkidle2' });
+    
+    sendLog('📡 Підключаюсь до сайту...', 'info');
+    await page.goto(URL, { 
+      waitUntil: 'networkidle2',
+      timeout: 60000 
+    });
 
     sendLog('✅ Браузер відкрито. Підключіть гаманець і авторизуйтесь', 'success');
+    sendLog('💡 Після авторизації натисніть кнопку "Зберегти сесію"', 'info');
 
     res.json({ success: true });
   } catch (error) {
@@ -66,18 +103,21 @@ app.post('/api/open-browser', async (req, res) => {
   }
 });
 
-// КРОК 2: Зберегти сесію після логіну
+// ENDPOINT: Зберегти сесію після логіну
 app.post('/api/save-session', async (req, res) => {
   try {
     if (!page) {
-      throw new Error('Браузер не відкрито');
+      throw new Error('Браузер не відкрито. Спочатку натисніть "Відкрити браузер"');
     }
 
     sendLog('💾 Зберігаю сесію...', 'info');
 
+    // Зберігаємо cookies
     const cookies = await page.cookies();
+    
+    // Зберігаємо localStorage
     const localStorage = await page.evaluate(() => {
-      return JSON.stringify(localStorage);
+      return JSON.stringify(window.localStorage);
     });
 
     const authData = {
@@ -89,7 +129,8 @@ app.post('/api/save-session', async (req, res) => {
 
     fs.writeFileSync(COOKIES_PATH, JSON.stringify(authData, null, 2));
 
-    sendLog('✅ Сесія збережена успішно!', 'success');
+    sendLog('✅ Сесію збережено успішно!', 'success');
+    sendLog('🎯 Тепер можна запускати моніторинг', 'info');
 
     // Закриваємо браузер
     if (browser) {
@@ -105,7 +146,7 @@ app.post('/api/save-session', async (req, res) => {
   }
 });
 
-// КРОК 3: Запуск моніторингу
+// ENDPOINT: Запуск моніторингу
 app.post('/api/start-monitoring', async (req, res) => {
   try {
     const { botToken, chatId, interval } = req.body;
@@ -115,31 +156,44 @@ app.post('/api/start-monitoring', async (req, res) => {
     }
 
     if (!fs.existsSync(COOKIES_PATH)) {
-      throw new Error('Спочатку потрібно авторизуватись!');
+      throw new Error('Спочатку потрібно авторизуватись! Натисніть "Відкрити браузер"');
     }
 
     // Ініціалізуємо Telegram
-    const botInit = initTelegramBot(botToken, chatId);
+    const botInit = initTelegramBot(botToken);
     if (!botInit.success) {
       throw new Error('Невірний Telegram токен');
     }
 
     sendLog('🚀 Запускаю моніторинг...', 'info');
 
-    // Відкриваємо headless браузер
+    // Запускаємо Xvfb якщо не запущений
+    if (!xvfbProcess) {
+      await startXvfb();
+    }
+
+    // Відкриваємо headless браузер для моніторингу
     browser = await puppeteer.launch({
       headless: 'new',
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu'
+      ]
     });
 
     page = await browser.newPage();
     await page.setViewport({ width: 1920, height: 1080 });
 
-    // Завантажуємо сесію
+    // Завантажуємо збережену сесію
+    sendLog('🔐 Завантажую збережену сесію...', 'info');
     const authData = JSON.parse(fs.readFileSync(COOKIES_PATH));
+    
     await page.setCookie(...authData.cookies);
     await page.goto(URL, { waitUntil: 'domcontentloaded' });
 
+    // Відновлюємо localStorage
     if (authData.localStorage) {
       await page.evaluate((localStorageData) => {
         const data = JSON.parse(localStorageData);
@@ -154,10 +208,17 @@ app.post('/api/start-monitoring', async (req, res) => {
     monitoringActive = true;
     let isButtonActive = false;
 
-    // Функція перевірки
+    // Функція перевірки кнопки
     async function checkButton() {
+      if (!monitoringActive) return;
+
       try {
-        await page.goto(URL, { waitUntil: 'networkidle2', timeout: 30000 });
+        await page.goto(URL, { 
+          waitUntil: 'networkidle2', 
+          timeout: 30000 
+        });
+
+        await page.waitForTimeout(2000);
 
         const buttonInfo = await page.evaluate(() => {
           const button = document.querySelector('a[href*="/marketplace/order/"]');
@@ -171,22 +232,23 @@ app.post('/api/start-monitoring', async (req, res) => {
           return {
             exists: true,
             isEnabled,
-            text: button.textContent.trim()
+            text: button.textContent.trim(),
+            classes: classes
           };
         });
 
         if (!buttonInfo.exists) {
-          sendLog('⚠️ Кнопка не знайдена', 'warning');
+          sendLog('⚠️ Кнопка не знайдена (можливо сесія застаріла)', 'warning');
           return;
         }
 
         const status = buttonInfo.isEnabled ? '✅ АКТИВНА' : '❌ Заблокована';
-        sendLog(`🔍 Перевірка: ${status}`, 'info');
+        sendLog(`🔍 Перевірка: Кнопка "${buttonInfo.text}" - ${status}`, 'info');
 
         // Якщо кнопка стала активною
         if (buttonInfo.isEnabled && !isButtonActive) {
           isButtonActive = true;
-          sendLog('🎉 КНОПКА АКТИВНА! Відправляю повідомлення...', 'success');
+          sendLog('🎉 КНОПКА СТАЛА АКТИВНОЮ! Відправляю повідомлення...', 'success');
 
           // Відправка в Telegram
           const message = `
@@ -196,7 +258,7 @@ app.post('/api/start-monitoring', async (req, res) => {
 
 🔗 [Перейти до покупки](${URL})
 
-⏰ ${new Date().toLocaleString('uk-UA')}
+⏰ ${new Date().toLocaleString('uk-UA', { timeZone: 'Europe/Kiev' })}
           `;
 
           await telegramBot.sendMessage(chatId, message, {
@@ -204,13 +266,27 @@ app.post('/api/start-monitoring', async (req, res) => {
           });
 
           // Скріншот
-          const screenshotPath = `./screenshot-${Date.now()}.png`;
-          await page.screenshot({ path: screenshotPath });
-          await telegramBot.sendPhoto(chatId, screenshotPath);
+          const screenshotPath = path.join(__dirname, `screenshot-${Date.now()}.png`);
+          await page.screenshot({ 
+            path: screenshotPath,
+            fullPage: false 
+          });
+          
+          await telegramBot.sendPhoto(chatId, screenshotPath, {
+            caption: '📸 Скріншот активної кнопки'
+          });
 
           sendLog('✅ Повідомлення відправлено в Telegram', 'success');
+
+          // Видаляємо скріншот після відправки
+          setTimeout(() => {
+            if (fs.existsSync(screenshotPath)) {
+              fs.unlinkSync(screenshotPath);
+            }
+          }, 5000);
         }
 
+        // Якщо кнопка стала неактивною знову
         if (!buttonInfo.isEnabled && isButtonActive) {
           isButtonActive = false;
           sendLog('⚠️ Кнопка знову заблокована', 'warning');
@@ -221,13 +297,14 @@ app.post('/api/start-monitoring', async (req, res) => {
       }
     }
 
-    // Перша перевірка
+    // Перша перевірка одразу
     await checkButton();
 
     // Періодична перевірка
     monitorInterval = setInterval(checkButton, interval * 1000);
 
-    sendLog(`✅ Моніторинг запущено (інтервал: ${interval}с)`, 'success');
+    sendLog(`✅ Моніторинг запущено (інтервал: ${interval} секунд)`, 'success');
+    sendLog(`📱 Повідомлення будуть відправлятись в Telegram Chat ID: ${chatId}`, 'info');
 
     res.json({ success: true });
 
@@ -237,9 +314,11 @@ app.post('/api/start-monitoring', async (req, res) => {
   }
 });
 
-// КРОК 4: Зупинка моніторингу
+// ENDPOINT: Зупинка моніторингу
 app.post('/api/stop-monitoring', async (req, res) => {
   try {
+    monitoringActive = false;
+
     if (monitorInterval) {
       clearInterval(monitorInterval);
       monitorInterval = null;
@@ -251,8 +330,6 @@ app.post('/api/stop-monitoring', async (req, res) => {
       page = null;
     }
 
-    monitoringActive = false;
-
     sendLog('🛑 Моніторинг зупинено', 'info');
 
     res.json({ success: true });
@@ -262,7 +339,7 @@ app.post('/api/stop-monitoring', async (req, res) => {
   }
 });
 
-// Перевірка статусу
+// ENDPOINT: Перевірка статусу
 app.get('/api/status', (req, res) => {
   res.json({
     monitoring: monitoringActive,
@@ -273,14 +350,50 @@ app.get('/api/status', (req, res) => {
 
 // WebSocket з'єднання
 io.on('connection', (socket) => {
-  sendLog('👤 Клієнт підключено', 'info');
+  console.log('Client connected');
+  sendLog('👤 Клієнт підключено до веб-інтерфейсу', 'info');
   
   socket.on('disconnect', () => {
-    sendLog('👤 Клієнт відключено', 'info');
+    console.log('Client disconnected');
   });
 });
 
-const PORT = process.env.PORT || 2121;
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('\n\nShutting down...');
+  
+  monitoringActive = false;
+  
+  if (monitorInterval) {
+    clearInterval(monitorInterval);
+  }
+  
+  if (browser) {
+    await browser.close();
+  }
+  
+  if (xvfbProcess) {
+    xvfbProcess.kill();
+  }
+  
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  if (browser) await browser.close();
+  if (xvfbProcess) xvfbProcess.kill();
+  process.exit(0);
+});
+
+// Запуск сервера
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`🌐 Сервер запущено: http://localhost:${PORT}`);
+  console.log(`
+╔════════════════════════════════════════╗
+║   Buy Button Monitor                   ║
+║   Server running on port ${PORT}         ║
+║                                        ║
+║   Open: http://localhost:${PORT}         ║
+╚════════════════════════════════════════╝
+  `);
 });

@@ -1,5 +1,6 @@
 const socket = io();
 
+// DOM Elements
 const statusIndicator = document.getElementById('statusIndicator');
 const statusText = document.getElementById('statusText');
 const openBrowserBtn = document.getElementById('openBrowserBtn');
@@ -15,17 +16,30 @@ const getChatIdLink = document.getElementById('getChatIdLink');
 const modal = document.getElementById('chatIdModal');
 const closeModal = document.querySelector('.close');
 
-// Завантажити збережені дані
+// Завантажити збережені дані з localStorage
 const savedBotToken = localStorage.getItem('botToken');
 const savedChatId = localStorage.getItem('chatId');
+const savedInterval = localStorage.getItem('interval');
+
 if (savedBotToken) botTokenInput.value = savedBotToken;
 if (savedChatId) chatIdInput.value = savedChatId;
+if (savedInterval) intervalInput.value = savedInterval;
 
-// Логи
+// Отримання логів від сервера через WebSocket
 socket.on('log', (data) => {
   addLog(data.message, data.type);
 });
 
+socket.on('connect', () => {
+  console.log('Connected to server');
+});
+
+socket.on('disconnect', () => {
+  console.log('Disconnected from server');
+  addLog('❌ З\'єднання з сервером втрачено', 'error');
+});
+
+// Функція додавання логу
 function addLog(message, type = 'info') {
   const entry = document.createElement('div');
   entry.className = `log-entry ${type}`;
@@ -37,72 +51,130 @@ function addLog(message, type = 'info') {
   logsContainer.scrollTop = logsContainer.scrollHeight;
 }
 
+// Функція встановлення статусу
 function setStatus(status, text) {
   const dot = statusIndicator.querySelector('.dot');
   dot.className = `dot ${status}`;
   statusText.textContent = text;
 }
 
-// Відкрити браузер
+// Функція блокування/розблокування кнопок
+function setButtonsState(state) {
+  switch(state) {
+    case 'initial':
+      openBrowserBtn.disabled = false;
+      saveSessionBtn.disabled = true;
+      startBtn.disabled = true;
+      stopBtn.disabled = true;
+      break;
+    case 'browser-open':
+      openBrowserBtn.disabled = true;
+      saveSessionBtn.disabled = false;
+      startBtn.disabled = true;
+      stopBtn.disabled = true;
+      break;
+    case 'session-saved':
+      openBrowserBtn.disabled = false;
+      saveSessionBtn.disabled = true;
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      break;
+    case 'monitoring':
+      openBrowserBtn.disabled = true;
+      saveSessionBtn.disabled = true;
+      startBtn.disabled = true;
+      stopBtn.disabled = false;
+      break;
+  }
+}
+
+// КНОПКА: Відкрити браузер
 openBrowserBtn.addEventListener('click', async () => {
-  openBrowserBtn.disabled = true;
-  addLog('Відкриваю браузер...', 'info');
+  setButtonsState('initial');
+  openBrowserBtn.innerHTML = '⏳ Відкриваю...';
+  addLog('Надсилаю запит на відкриття браузера...', 'info');
   
   try {
-    const response = await fetch('/api/open-browser', { method: 'POST' });
+    const response = await fetch('/api/open-browser', { 
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    
     const data = await response.json();
     
     if (data.success) {
-      saveSessionBtn.disabled = false;
       setStatus('active', 'Браузер відкрито');
+      setButtonsState('browser-open');
+      openBrowserBtn.innerHTML = '🌐 Відкрити браузер для логіну';
     } else {
       throw new Error(data.error);
     }
   } catch (error) {
     addLog(`Помилка: ${error.message}`, 'error');
-    openBrowserBtn.disabled = false;
+    setButtonsState('initial');
+    openBrowserBtn.innerHTML = '🌐 Відкрити браузер для логіну';
   }
 });
 
-// Зберегти сесію
+// КНОПКА: Зберегти сесію
 saveSessionBtn.addEventListener('click', async () => {
   saveSessionBtn.disabled = true;
+  saveSessionBtn.innerHTML = '⏳ Зберігаю...';
   addLog('Зберігаю сесію...', 'info');
   
   try {
-    const response = await fetch('/api/save-session', { method: 'POST' });
+    const response = await fetch('/api/save-session', { 
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    
     const data = await response.json();
     
     if (data.success) {
-      addLog('Сесію збережено! Можна запускати моніторинг', 'success');
       setStatus('', 'Готово до моніторингу');
-      openBrowserBtn.disabled = false;
-      startBtn.disabled = false;
+      setButtonsState('session-saved');
+      saveSessionBtn.innerHTML = '💾 Зберегти сесію';
     } else {
       throw new Error(data.error);
     }
   } catch (error) {
     addLog(`Помилка: ${error.message}`, 'error');
     saveSessionBtn.disabled = false;
+    saveSessionBtn.innerHTML = '💾 Зберегти сесію';
   }
 });
 
-// Запустити моніторинг
+// КНОПКА: Запустити моніторинг
 startBtn.addEventListener('click', async () => {
   const botToken = botTokenInput.value.trim();
   const chatId = chatIdInput.value.trim();
   const interval = parseInt(intervalInput.value);
   
-  if (!botToken || !chatId) {
-    addLog('Вкажіть Bot Token і Chat ID', 'error');
+  if (!botToken) {
+    addLog('❌ Вкажіть Telegram Bot Token!', 'error');
+    botTokenInput.focus();
+    return;
+  }
+  
+  if (!chatId) {
+    addLog('❌ Вкажіть Telegram Chat ID!', 'error');
+    chatIdInput.focus();
+    return;
+  }
+  
+  if (interval < 10) {
+    addLog('❌ Мінімальний інтервал - 10 секунд!', 'error');
+    intervalInput.focus();
     return;
   }
   
   // Зберегти в localStorage
   localStorage.setItem('botToken', botToken);
   localStorage.setItem('chatId', chatId);
+  localStorage.setItem('interval', interval);
   
   startBtn.disabled = true;
+  startBtn.innerHTML = '⏳ Запускаю...';
   addLog('Запускаю моніторинг...', 'info');
   
   try {
@@ -116,47 +188,53 @@ startBtn.addEventListener('click', async () => {
     
     if (data.success) {
       setStatus('monitoring', 'Моніторинг активний');
-      stopBtn.disabled = false;
-      openBrowserBtn.disabled = true;
-      saveSessionBtn.disabled = true;
+      setButtonsState('monitoring');
+      startBtn.innerHTML = '▶️ Запустити моніторинг';
     } else {
       throw new Error(data.error);
     }
   } catch (error) {
     addLog(`Помилка: ${error.message}`, 'error');
     startBtn.disabled = false;
+    startBtn.innerHTML = '▶️ Запустити моніторинг';
   }
 });
 
-// Зупинити моніторинг
+// КНОПКА: Зупинити моніторинг
 stopBtn.addEventListener('click', async () => {
   stopBtn.disabled = true;
+  stopBtn.innerHTML = '⏳ Зупиняю...';
   addLog('Зупиняю моніторинг...', 'info');
   
   try {
-    const response = await fetch('/api/stop-monitoring', { method: 'POST' });
+    const response = await fetch('/api/stop-monitoring', { 
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    
     const data = await response.json();
     
     if (data.success) {
       setStatus('', 'Зупинено');
-      startBtn.disabled = false;
-      openBrowserBtn.disabled = false;
+      setButtonsState('session-saved');
+      stopBtn.innerHTML = '⏹️ Зупинити моніторинг';
     } else {
       throw new Error(data.error);
     }
   } catch (error) {
     addLog(`Помилка: ${error.message}`, 'error');
     stopBtn.disabled = false;
+    stopBtn.innerHTML = '⏹️ Зупинити моніторинг';
   }
 });
 
-// Очистити логи
+// КНОПКА: Очистити логи
 clearLogsBtn.addEventListener('click', () => {
   logsContainer.innerHTML = '';
   addLog('Логи очищено', 'info');
 });
 
-// Модальне вікно
+// МОДАЛЬНЕ ВІКНО: Як отримати Chat ID
 getChatIdLink.addEventListener('click', (e) => {
   e.preventDefault();
   modal.style.display = 'block';
@@ -172,25 +250,34 @@ window.addEventListener('click', (e) => {
   }
 });
 
-// Перевірка статусу при завантаженні
-async function checkStatus() {
+// Перевірка статусу при завантаженні сторінки
+async function checkInitialStatus() {
   try {
     const response = await fetch('/api/status');
     const data = await response.json();
     
     if (data.hasSession) {
-      startBtn.disabled = false;
-      addLog('Знайдено збережену сесію', 'success');
+      addLog('✅ Знайдено збережену сесію', 'success');
+      setButtonsState('session-saved');
+    } else {
+      addLog('ℹ️ Спочатку потрібно авторизуватись', 'info');
+      setButtonsState('initial');
     }
     
     if (data.monitoring) {
       setStatus('monitoring', 'Моніторинг активний');
-      stopBtn.disabled = false;
-      startBtn.disabled = true;
+      setButtonsState('monitoring');
+      addLog('✅ Моніторинг вже запущено', 'success');
     }
   } catch (error) {
-    console.error(error);
+    console.error('Error checking status:', error);
+    addLog('⚠️ Не вдалося перевірити статус', 'warning');
   }
 }
 
-checkStatus();
+// Запуск перевірки при завантаженні
+checkInitialStatus();
+
+// Показати версію та інфо
+console.log('%c Buy Button Monitor v1.0 ', 'background: #667eea; color: white; font-size: 16px; padding: 5px 10px; border-radius: 5px;');
+console.log('Server connected ✅');
