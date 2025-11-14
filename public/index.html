@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Buy Button Monitor</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🔔 Buy Button Monitor</h1>
+      <p>Моніторинг кнопки покупки на apm.iamlimitless.io</p>
+    </header>
+
+    <div class="status-card">
+      <div class="status-indicator" id="statusIndicator">
+        <span class="dot"></span>
+        <span id="statusText">Не підключено</span>
+      </div>
+    </div>
+
+    <!-- Крок 1: Авторизація -->
+    <div class="card">
+      <h2>1️⃣ Авторизація</h2>
+      <p>Підключіть криптогаманець до сайту</p>
+      <button id="openBrowserBtn" class="btn btn-primary">
+        🌐 Відкрити браузер для логіну
+      </button>
+      <button id="saveSessionBtn" class="btn btn-success" disabled>
+        💾 Зберегти сесію
+      </button>
+    </div>
+
+    <!-- Крок 2: Налаштування Telegram -->
+    <div class="card">
+      <h2>2️⃣ Налаштування Telegram</h2>
+      
+      <div class="form-group">
+        <label>Telegram Bot Token:</label>
+        <input type="text" id="botToken" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11">
+        <small>Отримайте у @BotFather</small>
+      </div>
+
+      <div class="form-group">
+        <label>Telegram Chat ID:</label>
+        <input type="text" id="chatId" placeholder="123456789">
+        <small>Отримайте через <a href="#" id="getChatIdLink">цей метод</a></small>
+      </div>
+
+      <div class="form-group">
+        <label>Інтервал перевірки (секунди):</label>
+        <input type="number" id="interval" value="30" min="10" max="300">
+      </div>
+    </div>
+
+    <!-- Крок 3: Запуск -->
+    <div class="card">
+      <h2>3️⃣ Моніторинг</h2>
+      <div class="button-group">
+        <button id="startBtn" class="btn btn-success btn-lg">
+          ▶️ Запустити моніторинг
+        </button>
+        <button id="stopBtn" class="btn btn-danger btn-lg" disabled>
+          ⏹️ Зупинити моніторинг
+        </button>
+      </div>
+    </div>
+
+    <!-- Логи -->
+    <div class="card">
+      <h2>📋 Логи</h2>
+      <div id="logs" class="logs"></div>
+      <button id="clearLogsBtn" class="btn btn-secondary btn-sm">Очистити</button>
+    </div>
+
+    <!-- Модальне вікно для Chat ID -->
+    <div id="chatIdModal" class="modal">
+      <div class="modal-content">
+        <span class="close">&times;</span>
+        <h2>Як отримати Chat ID?</h2>
+        <ol>
+          <li>Знайдіть вашого бота в Telegram</li>
+          <li>Напишіть йому будь-яке повідомлення (наприклад "привіт")</li>
+          <li>Відкрийте цей URL у браузері (замініть TOKEN):<br>
+            <code>https://api.telegram.org/bot<strong>YOUR_TOKEN</strong>/getUpdates</code>
+          </li>
+          <li>Знайдіть <code>"chat":{"id":123456789}</code></li>
+          <li>Скопіюйте число після "id":</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
